@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MKBAgenda - Sistema Profissional</title>
+  <style>
+    :root { --pink: #ff40b5; --bg: #050505; --card: #121212; --text: #fff; --border: rgba(255,255,255,0.1); }
+    * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); overflow-x: hidden; }
+    .screen { position: fixed; inset: 0; background: #000; z-index: 1000; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; }
+    .active-screen { display: flex; }
+    .card { background: var(--card); padding: 20px; border-radius: 15px; border: 1px solid var(--border); width: 100%; max-width: 500px; margin: auto; }
+    .btn-main { width: 100%; padding: 15px; background: var(--pink); color: #000; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; margin-top: 10px; text-decoration: none; display: block; text-align: center; }
+    .btn-sec { width: 100%; padding: 10px; background: transparent; color: #fff; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; margin-top: 5px; }
+    input, select, textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff; margin-top: 8px; }
+    .day-config { display: flex; align-items: center; gap: 10px; margin-top: 10px; background: #1a1a1a; padding: 10px; border-radius: 8px; font-size: 12px; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 10px; }
+    .day { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: #1a1a1a; border-radius: 5px; cursor: pointer; font-size: 12px; }
+    .day.selected { background: var(--pink); color: #000; font-weight: bold; }
+    .day.off { opacity: 0.1; cursor: default; }
+  </style>
+</head>
+<body>
+
+<div id="screenWelcome" class="screen active-screen">
+    <h1 style="color: var(--pink);">MKBAgenda</h1>
+    <div class="card">
+        <button class="btn-main" onclick="openScreen('screenLogin')">Painel do Profissional</button>
+        <p style="text-align:center; font-size:12px; opacity:0.5;">Crie sua agenda e receba pedidos no WhatsApp</p>
+    </div>
+</div>
+
+<div id="screenLogin" class="screen">
+    <div class="card" id="boxLogin">
+        <h2>Login</h2>
+        <input type="email" id="lEmail" placeholder="E-mail">
+        <input type="password" id="lPass" placeholder="Senha">
+        <button class="btn-main" onclick="handleLogin()">Entrar</button>
+        <button class="btn-sec" onclick="toggleAuth(true)">Criar Conta Grátis</button>
+        <button class="btn-sec" onclick="openScreen('screenWelcome')">Voltar</button>
+    </div>
+    <div class="card" id="boxReg" style="display:none;">
+        <h2>Nova Conta</h2>
+        <input type="text" id="rName" placeholder="Nome do seu Negócio">
+        <input type="email" id="rEmail" placeholder="Seu E-mail">
+        <input type="text" id="rZap" placeholder="Seu WhatsApp (Ex: 5511999999999)">
+        <input type="password" id="rPass" placeholder="Crie uma Senha">
+        <button class="btn-main" onclick="handleRegister()">Cadastrar Profissional</button>
+        <button class="btn-sec" onclick="toggleAuth(false)">Voltar para o Login</button>
+    </div>
+</div>
+
+<div id="screenDash" class="screen" style="justify-content: flex-start;">
+    <div class="card" style="margin-top:20px;">
+        <h2 id="profTitle">Painel</h2>
+        <p style="font-size:14px; color:var(--pink);">Horários por dia de trabalho:</p>
+        <div id="configDiasList"></div>
+        <button class="btn-main" onclick="generateLink()">Gerar Meu Link de Agendamento</button>
+        
+        <div id="resultArea" style="display:none; margin-top:15px;">
+            <p style="font-size:12px;">Link gerado (WhatsApp aceita):</p>
+            <textarea id="finalLink" readonly style="height: 60px; font-size:10px; color:var(--pink); word-break:break-all;"></textarea>
+            <button class="btn-main" id="btnZap" style="background:#25d366;">Enviar Link para o WhatsApp</button>
+        </div>
+
+        <button class="btn-sec" onclick="logout()" style="color:red; margin-top:20px;">Sair</button>
+    </div>
+</div>
+
+<div id="screenCliente" class="screen" style="justify-content: flex-start;">
+    <div class="card" style="margin-top:20px;">
+        <h2 id="cliTitle">Agendamento</h2>
+        <div id="cliStep1">
+            <p>1. Escolha o dia:</p>
+            <div class="cal-grid" id="cal"></div>
+        </div>
+        <div id="cliStep2" style="display:none;">
+            <p>2. Escolha o horário:</p>
+            <select id="cliHora"></select>
+            <button class="btn-main" onclick="setStep(3)">Próximo Passo</button>
+        </div>
+        <div id="cliStep3" style="display:none;">
+            <p>3. Seus dados:</p>
+            <input id="cNome" placeholder="Seu Nome">
+            <textarea id="cServico" placeholder="O que você deseja fazer?"></textarea>
+            <button class="btn-main" onclick="finalizarCliente()">Confirmar no WhatsApp</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let users = JSON.parse(localStorage.getItem('mkb_users')) || [];
+const diasSemana = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+let agendaDados = null;
+let dataSel = "";
+
+const configList = document.getElementById('configDiasList');
+diasSemana.forEach(dia => {
+    configList.innerHTML += `<div class="day-config"><input type="checkbox" id="check_${dia}" checked><label style="width:70px">${dia}</label><input type="time" id="in_${dia}" value="08:00"><input type="time" id="out_${dia}" value="18:00"></div>`;
+});
+
+window.onload = () => {
+    // Detecta se é um link de cliente
+    const urlParams = new URLSearchParams(window.location.search);
+    if(urlParams.has('v')) {
+        try {
+            const decoded = atob(urlParams.get('v'));
+            agendaDados = JSON.parse(decodeURIComponent(escape(decoded)));
+            openScreen('screenCliente');
+            initCliente();
+        } catch(e) { console.error("Link inválido"); }
+    }
+};
+
+function openScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active-screen'));
+    document.getElementById(id).classList.add('active-screen');
+}
+
+function toggleAuth(reg) {
+    document.getElementById('boxLogin').style.display = reg ? 'none' : 'block';
+    document.getElementById('boxReg').style.display = reg ? 'block' : 'none';
+}
+
+function handleRegister() {
+    const n = document.getElementById('rName').value, e = document.getElementById('rEmail').value.toLowerCase(), z = document.getElementById('rZap').value, p = document.getElementById('rPass').value;
+    if(!n || !e || !z || p.length < 6) return alert("Preencha tudo!");
+    users.push({name: n, email: e, zap: z, pass: p});
+    localStorage.setItem('mkb_users', JSON.stringify(users));
+    alert("Conta criada com sucesso!"); toggleAuth(false);
+}
+
+function handleLogin() {
+    const e = document.getElementById('lEmail').value.toLowerCase(), p = document.getElementById('lPass').value;
+    const user = users.find(u => u.email === e && u.pass === p);
+    if(user) { localStorage.setItem('logged_user', e); loadDash(); } else alert("Dados incorretos!");
+}
+
+function loadDash() {
+    const user = users.find(u => u.email === localStorage.getItem('logged_user'));
+    document.getElementById('profTitle').textContent = user.name;
+    openScreen('screenDash');
+}
+
+function generateLink() {
+    const user = users.find(u => u.email === localStorage.getItem('logged_user'));
+    let configHorarios = {};
+    diasSemana.forEach(dia => {
+        if(document.getElementById(`check_${dia}`).checked) {
+            configHorarios[dia] = { i: document.getElementById(`in_${dia}`).value, o: document.getElementById(`out_${dia}`).value };
+        }
+    });
+
+    const dataObj = { n: user.name, z: user.zap, h: configHorarios };
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(dataObj))));
+    
+    // O SITE PEGA O LINK ATUAL (Ex: o seu link do GitHub)
+    const base = window.location.origin + window.location.pathname;
+    const linkFinal = `${base}?v=${encoded}`;
+
+    document.getElementById('finalLink').value = linkFinal;
+    document.getElementById('resultArea').style.display = 'block';
+    
+    document.getElementById('btnZap').onclick = () => {
+        window.location.href = `https://wa.me/?text=${encodeURIComponent("Olá! Este é meu link de agendamento: " + linkFinal)}`;
+    };
+}
+
+function initCliente() {
+    document.getElementById('cliTitle').textContent = agendaDados.n;
+    const cal = document.getElementById('cal');
+    const hoje = new Date();
+    for(let i=1; i<=31; i++) {
+        const d = document.createElement('div'); d.className = 'day'; d.textContent = i;
+        const dataObj = new Date(hoje.getFullYear(), hoje.getMonth(), i);
+        const nomeDia = diasSemana[dataObj.getDay()];
+        if(!agendaDados.h[nomeDia]) d.classList.add('off');
+        else {
+            d.onclick = () => { dataSel = i + "/" + (hoje.getMonth()+1); carregarHoras(nomeDia); setStep(2); };
+        }
+        cal.appendChild(d);
+    }
+}
+
+function carregarHoras(dia) {
+    const sel = document.getElementById('cliHora'); sel.innerHTML = "";
+    const hIn = parseInt(agendaDados.h[dia].i), hOut = parseInt(agendaDados.h[dia].o);
+    for(let h=hIn; h<hOut; h++) {
+        sel.innerHTML += `<option value="${h}:00">${h}:00</option><option value="${h}:30">${h}:30</option>`;
+    }
+}
+
+function setStep(n) {
+    [1,2,3].forEach(s => document.getElementById('cliStep'+s).style.display = 'none');
+    document.getElementById('cliStep'+n).style.display = 'block';
+}
+
+function finalizarCliente() {
+    const msg = `Olá ${agendaDados.n}! Agendamento:\nServiço: ${document.getElementById('cServico').value}\nData: ${dataSel} às ${document.getElementById('cliHora').value}\nNome: ${document.getElementById('cNome').value}`;
+    window.location.href = `https://wa.me/${agendaDados.z}?text=${encodeURIComponent(msg)}`;
+}
+
+function logout() { localStorage.clear(); location.reload(); }
+</script>
+</body>
+</html>
